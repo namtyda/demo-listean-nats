@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"context"
-
 	"github.com/namtyda/demo-listean-nats/internal/models"
 )
 
@@ -10,7 +8,7 @@ func (r *repository) ReadAll() (rowSlice []models.Cache, err error) {
 	query := `
 	SELECT order_uuid, data FROM orders;
 	`
-	rows, err := r.pool.Query(context.Background(), query)
+	rows, err := r.pool.Query(r.ctx, query)
 
 	if err != nil {
 		return

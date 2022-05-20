@@ -25,6 +25,7 @@ func (c *cache) Set(key, value string) {
 
 func (c *cache) Get(key string) (data string, err error) {
 	c.m.RLock()
+	defer c.m.RUnlock()
 	if v, ok := c.storage[key]; ok {
 		return v, nil
 	}

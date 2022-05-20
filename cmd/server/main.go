@@ -2,21 +2,32 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"flag"
 	"log"
-	"time"
 
 	"github.com/namtyda/demo-listean-nats/internal/app/cache"
+	"github.com/namtyda/demo-listean-nats/internal/app/handler"
 	client "github.com/namtyda/demo-listean-nats/internal/app/nats"
 	"github.com/namtyda/demo-listean-nats/internal/app/service"
+	"github.com/namtyda/demo-listean-nats/internal/app/web"
 	"github.com/namtyda/demo-listean-nats/internal/db"
-	"github.com/namtyda/demo-listean-nats/internal/models"
 	"github.com/namtyda/demo-listean-nats/internal/repository"
-	"github.com/nats-io/stan.go"
 )
 
 func main() {
+	var clusterID, serverID string
+	flag.StringVar(&clusterID, "cid", "test-cluster", "Cluster ID")
+	flag.StringVar(&serverID, "sid", "", "Client ID")
+	flag.Parse()
+
+	args := flag.Args()
+
+	if len(args) < 1 {
+		log.Fatal("You need pass subject ")
+	}
+
+	subject := args[0]
+
 	ctx := context.Background()
 	adpt, err := db.New(ctx)
 
@@ -24,34 +35,25 @@ func main() {
 		log.Fatalf("Err pgpool connect %s\n", err.Error())
 	}
 
-	repo := repository.New(adpt)
+	repo := repository.New(adpt, ctx)
 	cache := cache.New()
-	service := service.New(repo)
+	service := service.New(repo, cache)
+	handler := handler.New(service)
+	service.FillCache()
+	webServer := web.New(service)
 
-	sl, _ := repo.ReadAll()
-	for _, v := range sl {
-		cache.Set(v.Order_uuid, v.Data)
-	}
-
-	c := client.NewConnect()
-
-	sub, err := c.Sc.Subscribe("test", func(m *stan.Msg) {
-		shape := new(models.Order)
-
-		err := json.Unmarshal(m.Data, shape)
-
-		if err != nil {
-			log.Fatalf("Unmarshal err %s\n", err.Error())
-		}
-
-		// fmt.Printf("Received a message: %s\n", string(m.Data))
-		fmt.Println(shape.CustomerID)
-	})
+	c := client.NewConnect(clusterID, serverID)
+	sub, err := c.Sc.Subscribe(subject, handler.HandleSubcricbe)
 
 	if err != nil {
-		log.Fatal("err sub")
+		log.Fatalf("Error subscribe %s\n", err.Error())
 	}
-	defer sub.Unsubscribe()
-	// c.Sc.Publish("foo", []byte("Hello World"))
-	time.Sleep(time.Minute * 2)
+
+	defer (func() {
+		sub.Unsubscribe()
+		c.Sc.Close()
+		adpt.Close()
+	})()
+
+	webServer.Run()
 }
